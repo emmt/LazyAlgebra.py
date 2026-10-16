@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from .operators import Operator, Identity, add, compose
+from .operators import Operator, Identity, Adjoint, add, compose, simplify_prod
 
 # NOTE Diff is a singleton, hence its key is a constant given by the id of
 # its name (for unicity).
@@ -28,6 +28,14 @@ class Diff(Operator):
 
     def key(self):
         return _D_key
+
+    def try_simplify_prod(self, terms, i):
+        if i > 0:
+            prev = terms[i - 1]
+            if isinstance(prev, Adjoint) and isinstance(prev.parent, Diff):
+                # Predecessor is an instance of `adj(Diff())`.
+                return simplify_prod(terms, i - 1, 2, GramDiff())
+        return None
 
     # NOTE The differences along each dimension are stored in a single array.
     #      As a result, the output has an extra dimension of length the number

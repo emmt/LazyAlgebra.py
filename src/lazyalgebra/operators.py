@@ -58,36 +58,45 @@ class Operator(object):
 
     # self * other
     def __mul__(self, other):
-        if isinstance(other, Operator):
-            return compose(self, other)
-        elif np.isscalar(other):
+        if np.isscalar(other):
             return self.scaled_by(other)
-        else:
+        elif not isinstance(other, Operator):
             return self.apply(other)
+        elif isinstance(other, Identity):
+            return self
+        else:
+            return compose(self, other)
 
     # other * self
     def __rmul__(self, other):
-        if isinstance(other, Operator):
-            return compose(other, self)
-        elif np.isscalar(other):
+        if np.isscalar(other):
             return self.scaled_by(other)
-        raise ValueError('invalid left operand for right multiplication of an operator')
+        elif not isinstance(other, Operator):
+            raise ValueError('invalid left operand for right multiplication of an operator')
+        elif isinstance(other, Identity):
+            return self
+        else:
+            return compose(other, self)
 
     # self / other
     def __truediv__(self, other):
-        if isinstance(other, Operator):
-            return compose(self, other.inv())
-        elif np.isscalar(other):
+        if np.isscalar(other):
             return self.scaled_by(1/other)
-        raise ValueError('invalid right operand to left-division of an operator')
+        elif not isinstance(other, Operator):
+            raise ValueError('invalid right operand in division of operators')
+        elif isinstance(other, Identity):
+            return self
+        else:
+            return compose(self, other.inv())
 
-    # other/self
+    # other / self
     def __rtruediv__(self, other):
-        if isinstance(other, Operator):
+        if not isinstance(other, Operator):
+            raise ValueError('invalid left operand in division of operators')
+        elif isinstance(other, Identity):
+            return self.inv()
+        else:
             return compose(other, self.inv())
-        elif np.isscalar(other):
-            return self.inv().scaled_by(other)
-        raise ValueError('invalid right operand to left-division of an operator')
 
     def bits(self):
         """
@@ -161,49 +170,23 @@ class Operator(object):
         """
         raise NotImplementedError('`apply_inverse_adjoint` method not implemented for this operator')
 
-    def simplify_add(self, other):
+    def try_simplify_prod(self, terms, i):
         """
-        Simplify the addition `self + other`. Return `None` if no
-        simplification is possible.
-        """
-        if isinstance(other, Scaled) and other.multiplier == 0:
-            return self
-        else:
-            return None
+        Try to simplify the composition of `terms` around `self` which sits at
+        index `i` in `terms`.
 
-    def simplify_radd(self, other):
-        """
-        Simplify the addition `other + self`. Return `None` if no
-        simplification is possible.
-        """
-        if isinstance(other, Scaled) and other.multiplier == 0:
-            return self
-        else:
-            return None
+        This method shall return `None` if no simplification can be done.
+        Otherwise, if a simplification is possible, `try_simplify_prod` shall
+        return the result of `lazeyalgebra.operators.simplify_prod(terms, j, n,
+        ...)` with `j` and `n` the index of the first term and the number of
+        terms to replace in `terms` by the result of the simplification
+        represented by subsequent arguments `...` which may be an optional
+        scalar multiplier `alpha`, and operator(s) to replace the ones
+        `terms[j:j+n]`. Note that `j` may be different from `i`. For example
+        `j = i - 1`, if the preceding term simplifies with `self`.
 
-    def simplify_mul(self, other):
         """
-        Simplify the composition `self * other`. Return `None` if no
-        simplification is possible.
-        """
-        if isinstance(other, Identity):
-            return self
-        elif isinstance(other, Scaled) and isinstance(other.operator, Identity):
-            return self.scaled_by(other.multiplier)
-        else:
-            return None
-
-    def simplify_rmul(self, other):
-        """
-        Simplify the composition of `other * self`. Return `None` if no
-        simplification is possible.
-        """
-        if isinstance(other, Identity):
-            return self
-        elif isinstance(other, Scaled) and isinstance(other.operator, Identity):
-            return self.scaled_by(other.multiplier)
-        else:
-            return None
+        return None
 
 class Adjoint(Operator):
     """
@@ -283,6 +266,16 @@ class Inverse(Operator):
     def inv(self):
         # Simplify inverse of inverse.
         return self.parent
+
+    def try_simplify_prod(self, terms, i):
+        if i + 1 < len(terms) and terms[i + 1] == self.parent:
+            # This operator is the inverse of its successor.
+            return simplify_prod(terms, i, 2)
+        elif i > 0 and terms[i - 1] == self.parent:
+            # This operator is the inverse of its predecessor.
+            return simplify_prod(terms, i - 1, 2)
+        else:
+            return None
 
     def apply(self, x):
         return self.parent.apply_inverse(x)
@@ -577,8 +570,22 @@ def compose(A, B):
     terms = []
     alpha = collect_prod_terms(1, terms, A)
     alpha = collect_prod_terms(alpha, terms, B)
-    # Discard identities and build the operator resulting form the composition.
-    terms = list(A for A in terms if not isinstance(A, Identity))
+
+    # Succesively attempt to simplify consecutive terms in the composition by
+    # calling the `try_simplify_prod` of each operator of the composition.
+    i = 0
+    while i < len(terms):
+        r = terms[i].try_simplify_prod(terms, i)
+        if r is None:
+            # No simplification at index `i`.
+            i += 1
+        else:
+            # Some simplifications were done. Update multiplier and manage to
+            # resume simplifications at the term immediately preceding the
+            # first term modified by the last simplifications.
+            alpha *= r[1]
+            i = max(0, r[0] - 1) # r[0] is the index of first replaced term
+    # Build the unscaled operator resulting form the composition.
     n = len(terms)
     if n == 0:
         A = Id
@@ -586,25 +593,50 @@ def compose(A, B):
         A = terms[0]
     else:
         A = Product(terms)
-    # Return the resulting operator scaled by the factorized multiplier.
-    return A.scaled_by(alpha)
+    # Return the operator scaled by the factorized multiplier.
+    if alpha == 1:
+        return A
+    else:
+        return Scaled(alpha, A)
 
 def collect_prod_terms(alpha, terms, A):
     """
     Append operator `A` in-place to the list of `terms` and return the updated
     scalar multiplier `alpha`. If `A` is a scaled operator, its operator is
     appended to `terms` and its multiplier times `alpha` is returned. If `A` is
-    a product, its terms are appended to `terms` and `alpha` is returned.
+    a product, its terms are appended to `terms` and `alpha` is returned. If
+    `A` is the identity it is omitted.
     """
     if isinstance(A, Scaled):
         return collect_prod_terms(alpha * A.multiplier, terms, A.operator)
     elif isinstance(A, Product):
         for B in A.terms:
             alpha = collect_prod_terms(alpha, terms, B)
-    else:
+    elif not isinstance(A, Identity):
         terms.append(A)
     return alpha
 
+def simplify_prod(terms, i, n, *args):
+    """
+    Simplify composition `terms` by replacing entries `terms[i:i+n]` by
+    arguments `*args`. The first of `*args` may be a scalar `alpha` to be
+    factorized on the left-hand side of the composition; otherwise `alpha=1` is
+    assumed. Return the 2-tuple `(i, alpha)` needed by `compose` to pursue the
+    simplifications.
+    """
+    # Extract leading scalar multiplier if any.
+    if len(args) > 0 and np.isscalar(args[0]):
+        alpha = args[0]
+        args = args[1:]
+    else:
+        alpha = 1
+    # Collect remaining terms as the operators whose composition replaces the
+    # simplified terms.
+    other_terms = []
+    for arg in args:
+        alpha = collect_prod_terms(alpha, other_terms, arg)
+    terms[i : i + n] = other_terms
+    return i, alpha
 
 class Product(Operator):
     """
