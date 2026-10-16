@@ -5,3 +5,4 @@ from .convolution import Conv
 from .diagonal import Diag
 from .diff import Diff
 from .operations import adj, inv, mul, inner
+from .rank1 import Rank1
