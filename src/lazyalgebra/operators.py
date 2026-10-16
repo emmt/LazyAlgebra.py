@@ -460,7 +460,7 @@ def add(A, B):
 def collect_sum_terms(terms, A):
     if isinstance(A, Sum):
         for B in A.terms:
-            collect_sum_terms(terms, SumTerm(B))
+            collect_sum_terms(terms, B)
     else:
         terms.append(SumTerm(A))
     return None
