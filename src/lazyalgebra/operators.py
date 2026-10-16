@@ -40,15 +40,21 @@ class Operator(object):
 
     # self + other
     def __add__(self, other):
-        if isinstance(other, Operator):
+        if not isinstance(other, Operator):
+            raise ValueError('only addition of operators is implemented')
+        if isinstance(other, Scaled) and other.multiplier == 0:
+            return self
+        else:
             return add(self, other)
-        raise ValueError('only addition of operators is implemented')
 
     # self - other
     def __sub__(self, other):
-        if isinstance(other, Operator):
+        if not isinstance(other, Operator):
+            raise ValueError('only subtraction of operators is implemented')
+        if isinstance(other, Scaled) and other.multiplier == 0:
+            return self
+        else:
             return add(self, other.scaled_by(-1))
-        raise ValueError('only subtraction of operators is implemented')
 
     # self * other
     def __mul__(self, other):
