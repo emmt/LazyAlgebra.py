@@ -19,10 +19,10 @@ def inner(x, y):
     """
     if x.shape != y.shape:
         raise Exception('arguments must have the same shape')
-    cmplx = np.iscomplexobj(x)
-    if np.iscomplexobj(y) ^ cmplx:
+    x_is_complex = np.iscomplexobj(x)
+    if np.iscomplexobj(y) ^ x_is_complex:
         raise Exception('arguments must be both real or both complex')
-    if cmplx(x):
+    if x_is_complex:
         # NOTE `np.inner` does take the conjugate.
         return np.inner(np.conj(x.ravel()), y.ravel())
     else:
