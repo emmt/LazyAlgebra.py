@@ -20,6 +20,9 @@ class Diag(Operator):
     def __init__(self, coefs):
         self.coefs = np.asarray(coefs)
 
+    def __repr__(self):
+        return 'Diag(…)'
+
     def __neg__(self):
         return Diag(-self.coefs)
 

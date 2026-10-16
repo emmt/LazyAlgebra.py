@@ -5,7 +5,6 @@ from numpy import isscalar
 from copy import copy, deepcopy
 from .utils import adapt_multiplier, scale_array
 
-# TODO adapt multiplier precision
 # TODO overload __pow__
 # TODO attributes key and bits are invariant and shall be computed at construction time
 # TODO make attributes private (by pre-pending an underscore)
@@ -201,6 +200,9 @@ class Adjoint(Operator):
         assert not isinstance(A, Scaled)
         self.parent = A
 
+    def __repr__(self):
+        return 'adj(' + repr(self.parent) + ')'
+
     def __eq__(self, other):
         return (self is other) or (isinstance(other, Adjoint)
                                    and self.parent == other.parent)
@@ -245,6 +247,9 @@ class Inverse(Operator):
         assert not isinstance(A, Inverse)
         assert not isinstance(A, Scaled)
         self.parent = A
+
+    def __repr__(self):
+        return 'inv(' + repr(self.parent) + ')'
 
     def __eq__(self, other):
         return (self is other) or (isinstance(other, Inverse)
@@ -303,6 +308,14 @@ class Scaled(Operator):
         self.multiplier = alpha
         self.operator = A
 
+    def __repr__(self):
+        alpha, A = self.descale()
+        repr_A = repr(A)
+        if alpha == -1:
+            return '-(' + repr_A + ')'
+        else:
+            return repr(alpha) + '*(' + repr_A + ')'
+
     def __eq__(self, other):
         if self is other:
             return True
@@ -353,6 +366,9 @@ class Identity(Operator):
     Identity operator.
     """
 
+    def __repr__(self):
+        return 'Id'
+
     def __call__(self, other):
         return np.asarray(other)
 
@@ -366,9 +382,6 @@ class Identity(Operator):
 
     def __eq__(self, other):
         return (self is other) or isinstance(other, Identity)
-
-    def __repr__(self):
-        return 'Id'
 
     def key(self):
         return -1 # to make sure identity is always ordered first
@@ -401,12 +414,12 @@ class Symbolic(Operator):
         assert isinstance(name, str)
         self.name = name
 
+    def __repr__(self):
+        return self.name
+
     def __eq__(self, other):
         return (self is other) or (isinstance(other, Symbolic)
                                    and self.name == other.name)
-
-    def __repr__(self):
-        return self.name
 
     def key(self):
         return id(self.name)
@@ -474,6 +487,31 @@ class Sum(Operator):
     def __init__(self, terms):
         assert len(terms) >= 2
         self.terms = terms
+
+    def __repr__(self):
+        r = ''
+        for A in self.terms:
+            if isinstance(A, Scaled):
+                alpha, A = A.descale()
+                s = repr(A)
+                if isinstance(A, Sum):
+                    s = '(' + s + ')'
+                if abs(alpha) != 1:
+                    s = repr(abs(alpha)) + '*' + s
+                if len(r) == 0:
+                    if alpha < 0:
+                        r = '-' + s
+                    else:
+                        r = s
+                else:
+                    r += (alpha < 0 and ' - ' or ' + ') + s
+            else:
+                s = repr(A)
+                if len(r) == 0:
+                    r = s
+                else:
+                    r += ' + ' + s
+        return r
 
     def __eq__(self, other):
         return (self is other) or (isinstance(other, Sum)
@@ -647,6 +685,19 @@ class Product(Operator):
     def __init__(self, terms):
         assert len(terms) >= 2
         self.terms = terms
+
+    def __repr__(self):
+        r = ''
+        for A in self.terms:
+            if isinstance(A, Sum):
+                s = '(' + repr(A) + ')'
+            else:
+                s = repr(A)
+            if len(r) == 0:
+                r = s
+            else:
+                r += '*' + s
+        return r
 
     def __eq__(self, other):
         return (self is other) or (isinstance(other, Product)
